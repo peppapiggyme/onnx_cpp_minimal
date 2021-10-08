@@ -31,7 +31,7 @@ private:
     std::vector<const char*> m_output_node_names;  // output node names
     
 public:
-    explicit OrtInferenceWrapper(const char *model_path, const char *env_name="test")
+    OrtInferenceWrapper(const char *model_path, const char *env_name="test")
         : m_env{ORT_LOGGING_LEVEL_WARNING, env_name}
         , m_session{m_env, model_path, Ort::SessionOptions{}}
         , m_allocator{}
@@ -43,11 +43,44 @@ public:
     {
     }
 
-    void init()
+    void Init(bool check=true)
+    {
+        if (check)
+        {
+            CheckInput();
+            CheckOutput();
+        }
+    }
+
+    vector<float> GetOutputSimplified(vector<float>& input_tensor_values) // simplified input shape
+    {
+        // create input tensor object from data values
+        // 2 = dim(1, input_dim)
+        // simplified input tensor (vector) and size
+        Ort::Value input_tensor = Ort::Value::CreateTensor<float>(m_meminfo, 
+            input_tensor_values.data(), (size_t)input_tensor_values.size(), m_input_node_dims.data(), 2);
+        // assert(input_tensor.IsTensor());
+
+        // score model & input tensor, get back output tensor
+        auto output_tensors = m_session.Run(
+            Ort::RunOptions{nullptr}, m_input_node_names.data(), &input_tensor, 1, m_output_node_names.data(), 1);
+        // assert(output_tensors.size() == 1 && output_tensors.front().IsTensor());
+
+        float* floatarr = output_tensors.front().GetTensorMutableData<float>();
+
+        // simplified output model
+        size_t actual_output_node_dim = m_output_node_dims.back();
+        vector<float> output(actual_output_node_dim);
+        for (int i = 0; i < actual_output_node_dim; i++)
+            output[i] = std::exp(floatarr[i]);
+        
+        return output;
+    }
+
+private:
+    void CheckInput()
     {
         printf("Number of inputs  = %zu\n", m_num_input_nodes);
-        printf("Number of outputs = %zu\n", m_num_output_nodes);
-
         // iterate over all input nodes
         for (int i = 0; i < m_num_input_nodes; i++) {
             // print input node names
@@ -68,7 +101,11 @@ public:
             for (int j = 0; j < m_input_node_dims.size(); j++)
                 printf("Input %d : dim %d=%jd\n", i, j, m_input_node_dims[j]);
         }
+    }
 
+    void CheckOutput()
+    {
+        printf("Number of outputs = %zu\n", m_num_output_nodes);
         // iterate over all output nodes
         for (int i = 0; i < m_num_output_nodes; i++) {
             // print output node names
@@ -89,24 +126,5 @@ public:
             for (int j = 0; j < m_output_node_dims.size(); j++)
                 printf("Output %d : dim %d=%jd\n", i, j, m_output_node_dims[j]);
         }
-    }
-
-    void run(vector<float>& input_tensor_values) // simplified input shape
-    {
-        // create input tensor object from data values
-        Ort::Value input_tensor = Ort::Value::CreateTensor<float>(m_meminfo, 
-            input_tensor_values.data(), (size_t)input_tensor_values.size(), m_input_node_dims.data(), 2);  // 2 = dim(1, input_dim)
-        // assert(input_tensor.IsTensor());
-
-        // score model & input tensor, get back output tensor
-        auto output_tensors = m_session.Run(
-            Ort::RunOptions{nullptr}, m_input_node_names.data(), &input_tensor, 1, m_output_node_names.data(), 1);
-        // assert(output_tensors.size() == 1 && output_tensors.front().IsTensor());
-
-        float* floatarr = output_tensors.front().GetTensorMutableData<float>();
-
-        // score the model, and print scores for first 5 classes
-        for (int i = 0; i < 2; i++)
-            printf("Score for class [%s] =  %f\n", i == 0 ? "Bkg" : "Sig", std::exp(floatarr[i]));
     }
 };
